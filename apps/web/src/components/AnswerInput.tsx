@@ -10,7 +10,6 @@ interface AnswerInputProps {
   simulateLatency: boolean;
 }
 
-// 1. Removed React.FC for a standard function (Modern Best Practice)
 export function AnswerInput({
   questionId,
   questionText,
@@ -22,48 +21,40 @@ export function AnswerInput({
   const [lastSaved, setLastSaved] = useState<number | null>(null);
 
   useEffect(() => {
-    // If empty, don't trigger a sync
     if (!answer.trim()) {
       setStatus('idle');
       return;
     }
 
-    // 2. Add a flag to prevent race conditions during the async "simulated" lag
     let isSubscribed = true;
+    let timer: NodeJS.Timeout | null = null;
 
-    const performSave = async () => {
-      // Small delay before starting "Syncing" state (Debounce)
-      const timer = setTimeout(async () => {
-        if (!isSubscribed) return;
-        
-        setStatus('syncing');
-        
-        try {
-          if (simulateLatency) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-          }
-
-          // Only update state if this effect is still the active one
-          await onSave(answer);
-          
-          if (isSubscribed) {
-            setStatus('saved');
-            setLastSaved(Date.now());
-          }
-        } catch (error) {
-          if (isSubscribed) setStatus('error');
+    // Small delay before starting "Syncing" state (Debounce)
+    timer = setTimeout(async () => {
+      if (!isSubscribed) return;
+      
+      setStatus('syncing');
+      
+      try {
+        if (simulateLatency) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
         }
-      }, 1000);
 
-      return timer;
-    };
+        // Only update state if this effect is still the active one
+        await onSave(answer);
+        
+        if (isSubscribed) {
+          setStatus('saved');
+          setLastSaved(Date.now());
+        }
+      } catch (error) {
+        if (isSubscribed) setStatus('error');
+      }
+    }, 1000);
 
-    const timerPromise = performSave();
-
-    // 3. Cleanup: If the user types again, this cancels the previous "save" effect
     return () => {
       isSubscribed = false;
-      timerPromise.then(timer => clearTimeout(timer));
+      if (timer) clearTimeout(timer);
     };
   }, [answer, onSave, simulateLatency]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, RefreshCcw, AlertCircle } from 'lucide-react';
 
 interface AnswerInputProps {
@@ -10,46 +10,74 @@ interface AnswerInputProps {
   simulateLatency: boolean;
 }
 
-export const AnswerInput: React.FC<AnswerInputProps> = ({
+// 1. Removed React.FC for a standard function (Modern Best Practice)
+export function AnswerInput({
   questionId,
   questionText,
   onSave,
   simulateLatency,
-}) => {
+}: AnswerInputProps) {
   const [answer, setAnswer] = useState('');
   const [status, setStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
 
-  // Debounce saving
   useEffect(() => {
-    if (answer === '') return;
+    // If empty, don't trigger a sync
+    if (!answer.trim()) {
+      setStatus('idle');
+      return;
+    }
 
-    const timer = setTimeout(async () => {
-      setStatus('syncing');
-      try {
-        if (simulateLatency) {
-          // Simulate network delay
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+    // 2. Add a flag to prevent race conditions during the async "simulated" lag
+    let isSubscribed = true;
+
+    const performSave = async () => {
+      // Small delay before starting "Syncing" state (Debounce)
+      const timer = setTimeout(async () => {
+        if (!isSubscribed) return;
+        
+        setStatus('syncing');
+        
+        try {
+          if (simulateLatency) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+
+          // Only update state if this effect is still the active one
+          await onSave(answer);
+          
+          if (isSubscribed) {
+            setStatus('saved');
+            setLastSaved(Date.now());
+          }
+        } catch (error) {
+          if (isSubscribed) setStatus('error');
         }
-        await onSave(answer);
-        setStatus('saved');
-        setLastSaved(Date.now());
-      } catch (error) {
-        setStatus('error');
-      }
-    }, 1000);
+      }, 1000);
 
-    return () => clearTimeout(timer);
+      return timer;
+    };
+
+    const timerPromise = performSave();
+
+    // 3. Cleanup: If the user types again, this cancels the previous "save" effect
+    return () => {
+      isSubscribed = false;
+      timerPromise.then(timer => clearTimeout(timer));
+    };
   }, [answer, onSave, simulateLatency]);
 
   return (
     <div className="w-full max-w-2xl p-6 bg-white rounded-xl shadow-sm border border-zinc-100 transition-all hover:shadow-md">
       <div className="mb-4">
-        <h3 className="text-lg font-medium text-zinc-900">{questionText}</h3>
+        <label htmlFor={`q-${questionId}`} className="text-lg font-medium text-zinc-900 block">
+          {questionText}
+        </label>
       </div>
       
       <div className="relative">
         <textarea
+          id={`q-${questionId}`}
           className="w-full p-4 text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all resize-none min-h-[120px]"
           placeholder="Type your answer here..."
           value={answer}
@@ -59,7 +87,11 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
           }}
         />
         
-        <div className="absolute bottom-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-zinc-100 text-xs font-medium transition-all">
+        {/* Status Indicator with ARIA for accessibility */}
+        <div 
+          aria-live="polite"
+          className="absolute bottom-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-zinc-100 text-xs font-medium transition-all"
+        >
           {status === 'syncing' && (
             <>
               <RefreshCcw className="w-3.5 h-3.5 animate-spin text-blue-500" />
@@ -94,5 +126,4 @@ export const AnswerInput: React.FC<AnswerInputProps> = ({
       )}
     </div>
   );
-};
-
+}

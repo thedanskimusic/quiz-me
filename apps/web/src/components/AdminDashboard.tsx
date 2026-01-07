@@ -36,11 +36,18 @@ export function AdminDashboard() {
   const [totalStudents, setTotalStudents] = useState<number>(842000);
   const [avgLatency, setAvgLatency] = useState<number>(42);
   const [queueDepth, setQueueDepth] = useState<number>(1234);
-  const [schoolAStudents, setSchoolAStudents] = useState<Student[]>(() => generateInitialStudents('School A', 50));
-  const [schoolBStudents, setSchoolBStudents] = useState<Student[]>(() => generateInitialStudents('School B', 50));
-  const [healthData, setHealthData] = useState<number[]>(() => 
-    Array.from({ length: 15 }, () => Math.floor(Math.random() * 30 + 70)) // 70-100%
-  );
+  // Initialize with empty arrays to avoid hydration mismatch
+  const [schoolAStudents, setSchoolAStudents] = useState<Student[]>([]);
+  const [schoolBStudents, setSchoolBStudents] = useState<Student[]>([]);
+  // Initialize with consistent default values
+  const [healthData, setHealthData] = useState<number[]>(Array(15).fill(75));
+
+  // Initialize data after mount (client-side only)
+  useEffect(() => {
+    setSchoolAStudents(generateInitialStudents('School A', 50));
+    setSchoolBStudents(generateInitialStudents('School B', 50));
+    setHealthData(Array.from({ length: 15 }, () => Math.floor(Math.random() * 30 + 70)));
+  }, []);
 
   // Simulate live updates
   useEffect(() => {

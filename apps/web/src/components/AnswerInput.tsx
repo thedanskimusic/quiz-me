@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, RefreshCcw, AlertCircle } from 'lucide-react';
+import { CheckCircle2, RefreshCcw, AlertCircle, WifiOff } from 'lucide-react';
 
 interface AnswerInputProps {
   questionId: string;
@@ -17,12 +17,37 @@ export function AnswerInput({
   simulateLatency,
 }: AnswerInputProps) {
   const [answer, setAnswer] = useState('');
-  const [status, setStatus] = useState<'idle' | 'syncing' | 'saved' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'syncing' | 'saved' | 'error' | 'offline'>('idle');
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [queuedAnswer, setQueuedAnswer] = useState<string | null>(null);
 
+  // Online/Offline detection
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Save logic with offline queue support
   useEffect(() => {
     if (!answer.trim()) {
       setStatus('idle');
+      setQueuedAnswer(null);
+      return;
+    }
+
+    // If offline, queue the answer instead of attempting save
+    if (!isOnline) {
+      setQueuedAnswer(answer);
+      setStatus('offline');
       return;
     }
 
@@ -46,6 +71,7 @@ export function AnswerInput({
         if (isSubscribed) {
           setStatus('saved');
           setLastSaved(Date.now());
+          setQueuedAnswer(null); // Clear queue on successful save
         }
       } catch (error) {
         if (isSubscribed) setStatus('error');
@@ -56,7 +82,40 @@ export function AnswerInput({
       isSubscribed = false;
       if (timer) clearTimeout(timer);
     };
-  }, [answer, onSave, simulateLatency]);
+  }, [answer, onSave, simulateLatency, isOnline]);
+
+  // Reconnection retry: automatically save queued answer when connection returns
+  useEffect(() => {
+    if (isOnline && queuedAnswer && queuedAnswer.trim()) {
+      let isSubscribed = true;
+
+      const retrySave = async () => {
+        setStatus('syncing');
+        
+        try {
+          if (simulateLatency) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+
+          await onSave(queuedAnswer);
+          
+          if (isSubscribed) {
+            setStatus('saved');
+            setLastSaved(Date.now());
+            setQueuedAnswer(null);
+          }
+        } catch (error) {
+          if (isSubscribed) setStatus('error');
+        }
+      };
+
+      retrySave();
+
+      return () => {
+        isSubscribed = false;
+      };
+    }
+  }, [isOnline, queuedAnswer, onSave, simulateLatency]);
 
   return (
     <div className="w-full max-w-2xl p-6 bg-white rounded-xl shadow-sm border border-zinc-100 transition-all hover:shadow-md">
@@ -80,25 +139,40 @@ export function AnswerInput({
         
         {/* Status Indicator with ARIA for accessibility */}
         <div 
-          aria-live="polite"
+          role="status"
+          aria-live={status === 'offline' ? 'assertive' : 'polite'}
+          aria-label={
+            status === 'syncing' ? 'Syncing answer' :
+            status === 'saved' ? 'Answer saved successfully' :
+            status === 'error' ? 'Error saving answer' :
+            status === 'offline' ? 'Offline. Answer queued for sync when connection returns' :
+            status === 'idle' && answer !== '' ? 'Waiting to sync answer' :
+            'Answer input'
+          }
           className="absolute bottom-3 right-3 flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-zinc-100 text-xs font-medium transition-all"
         >
           {status === 'syncing' && (
             <>
-              <RefreshCcw className="w-3.5 h-3.5 animate-spin text-blue-500" />
+              <RefreshCcw className="w-3.5 h-3.5 animate-spin text-blue-500" aria-hidden="true" />
               <span className="text-blue-600">Syncing...</span>
             </>
           )}
           {status === 'saved' && (
             <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" aria-hidden="true" />
               <span className="text-emerald-600">Saved</span>
             </>
           )}
           {status === 'error' && (
             <>
-              <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+              <AlertCircle className="w-3.5 h-3.5 text-rose-500" aria-hidden="true" />
               <span className="text-rose-600">Error</span>
+            </>
+          )}
+          {status === 'offline' && (
+            <>
+              <WifiOff className="w-3.5 h-3.5 text-amber-500" aria-hidden="true" />
+              <span className="text-amber-600">Offline - Queued for sync</span>
             </>
           )}
           {status === 'idle' && answer !== '' && (
